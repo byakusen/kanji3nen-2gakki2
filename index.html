@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>漢字フラッシュカード｜セット切替＋自動判定（厳格採点）</title>
+<style>
+  :root{ --bg:#0f172a; --panel:#111827ee; --card:#0b1220; --muted:#94a3b8; --text:#e5e7eb; --accent:#38bdf8; --good:#22c55e; --bad:#ef4444; --shadow:0 10px 30px rgba(0,0,0,.35); --radius:18px; }
+  *{box-sizing:border-box} html,body{height:100%}
+  body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif;
+    background:radial-gradient(1200px 800px at 80% -10%, #1e293b 0%, var(--bg) 60%); color:var(--text); display:flex; align-items:center; justify-content:center; padding:20px;}
+  .app{width:min(1200px,100%)}
+  header{display:grid; gap:12px; margin-bottom:12px}
+  header h1{font-size:20px; font-weight:700; margin:0 0 4px}
+  .topbar{display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap}
+  .controls{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+  .group{background:var(--panel); border:1px solid #1f2937; padding:8px 10px; border-radius:14px; display:flex; align-items:center; gap:10px}
+  .btn{padding:10px 14px; border-radius:12px; border:1px solid #374151; background:#0b1220; color:var(--text); cursor:pointer; font-weight:600}
+  .btn:disabled{opacity:.5; cursor:not-allowed}
+  .primary{background:linear-gradient(180deg,#38bdf8,#0284c7); color:black; border:none}
+  .good{background:linear-gradient(180deg,#22c55e,#15803d); border:none; color:#062b18}
+  .bad{background:linear-gradient(180deg,#ef4444,#b91c1c); border:none; color:#2b0a0a}
+
+  .setbar{display:grid; grid-template-columns: repeat(auto-fit, minmax(90px,1fr)); gap:8px}
+  .setbtn{padding:10px 8px; border-radius:12px; background:#0b1220; border:1px solid #334155; cursor:pointer; font-weight:700}
+  .setbtn[aria-current="true"]{background:linear-gradient(180deg,#22d3ee,#38bdf8); color:black; border:none}
+
+  .board{display:grid; grid-template-columns:1fr 420px; gap:18px; align-items:stretch; margin-top:12px}
+  @media (max-width:900px){ .board{grid-template-columns:1fr} }
+
+  .card{ background:linear-gradient(180deg,#0b1220,#0a0f1a); border:1px solid #1f2937; border-radius:var(--radius);
+    padding:24px; box-shadow:var(--shadow); position:relative; display:flex; align-items:center; justify-content:center; min-height:320px;
+    perspective:1000px; transition: box-shadow .25s ease, transform .12s ease; }
+  .card.ok{box-shadow:0 0 0 3px var(--good), var(--shadow)}
+  .card.ng{box-shadow:0 0 0 3px var(--bad), var(--shadow)}
+  .inner{position:relative; width:100%; height:100%; transform-style:preserve-3d; transition: transform .5s cubic-bezier(.2,.8,.2,1)}
+  .card[data-flipped="true"] .inner{transform: rotateY(180deg)}
+  .face{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; backface-visibility:hidden; border-radius:var(--radius)}
+  .front,.back{padding:20px}
+  .sub{color:var(--muted); font-size:14px; letter-spacing:.08em; text-transform:uppercase; margin-bottom:10px; text-align:center}
+  .front h2,.back h2{font-size:clamp(28px, 6.5vw, 64px); text-align:center; margin:0; line-height:1.25}
+  .back{transform: rotateY(180deg)}
+
+  .panel{background:var(--panel); border:1px solid #1f2937; border-radius:var(--radius); padding:16px; box-shadow:var(--shadow)}
+  .row{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:8px 0}
+  .progress{height:10px; background:#0b1220; border:1px solid #1f2937; border-radius:999px; overflow:hidden}
+  .bar{height:100%; width:0%; background:linear-gradient(90deg,var(--accent),#22d3ee)}
+  .stat{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px}
+  .pill{border:1px solid #374151; background:#0b1220; padding:10px 12px; border-radius:12px; text-align:center}
+  .pill strong{display:block; font-size:18px}
+  .note{color:var(--muted); font-size:13px}
+  .kbd{border:1px solid #374151; background:#0b1220; padding:2px 6px; border-radius:6px; font-family:ui-monospace,Menlo,Consolas,monospace}
+
+  .judge{display:flex; gap:8px; align-items:center}
+  .judge input{flex:1; padding:10px 12px; border-radius:10px; border:1px solid #334155; background:#0b1220; color:#e5e7eb; font-size:16px; outline:none}
+  .footer{margin-top:16px; color:var(--muted); font-size:13px; text-align:center}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>漢字フラッシュカード（NGのみ再出題）</h1>
+    <div class="topbar">
+      <div class="controls">
+        <div class="group">
+          <label><input type="checkbox" id="shuffleB" checked> シャッフル</label>
+          <label><input type="checkbox" id="autoModeB"> 自動判定</label>
+        </div>
+        <button class="btn primary" id="startBtn">スタート / リセット</button>
+      </div>
+      <div class="group"><span id="currentSetName">現在：漢ス1</span></div>
+    </div>
+    <div class="setbar" id="setBar" aria-label="セット切替"></div>
+  </header>
+
+  <div class="board">
+    <section class="card" id="card" aria-live="polite">
+      <div class="inner">
+        <div class="face front">
+          <div>
+            <div class="sub">表（読み＋文脈）</div>
+            <h2 id="question">セットとスタートを押してください</h2>
+          </div>
+        </div>
+        <div class="face back">
+          <div>
+            <div class="sub">裏（漢字）</div>
+            <h2 id="answer">—</h2>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="row"><strong>進捗</strong> <span id="count">0 / 0</span></div>
+      <div class="progress" aria-label="Progress"><div class="bar" id="bar"></div></div>
+      <div class="stat">
+        <div class="pill"><span>OK</span><strong id="okC">0</strong></div>
+        <div class="pill"><span>NG</span><strong id="ngC">0</strong></div>
+      </div>
+
+      <div class="row"><strong>タイマー</strong> <span id="timer">00:00.0</span></div>
+      <div class="row">
+        <button class="btn" id="timerToggle" disabled>一時停止</button>
+        <span class="note">スタートで自動開始 / 完了で停止</span>
+      </div>
+
+      <div class="row" id="manualBtns" style="justify-content:center; gap:10px; flex-wrap:wrap; margin-top:14px">
+        <button class="btn" id="revealBtn" disabled>答えを表示 <span class="kbd">Space</span></button>
+        <button class="btn good" id="okBtn" disabled>OK <span class="kbd">O</span></button>
+        <button class="btn bad" id="ngBtn" disabled>NG <span class="kbd">X</span></button>
+      </div>
+
+      <div class="row judge" id="autoJudgeRow" style="display:none">
+        <input id="answerInput" type="text" placeholder="ここに漢字で入力 → Enterで判定" autocomplete="off" />
+        <button class="btn" id="judgeBtn" disabled>判定</button>
+      </div>
+
+      <div class="row">
+        <button class="btn" id="undoBtn" disabled>1つ戻す</button>
+        <button class="btn" id="redoBtn" disabled>やり直す（最初から）</button>
+      </div>
+
+      <p class="note">※採点は<strong>厳格</strong>：全角/半角・空白の違いのみ無視。<strong>送り仮名の省略は不正解</strong>。</p>
+      <p class="note">手動: <span class="kbd">Space</span>=表示 / <span class="kbd">O</span>=OK / <span class="kbd">X</span>=NG　｜　自動: 入力→<span class="kbd">Enter</span></p>
+    </aside>
+  </div>
+
+  <div class="footer">© 漢字フラッシュカード（ローカル動作／データはブラウザ内のみ）</div>
+</div>
+
+<script>
+(function(){
+  const $  = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+
+  // ====== カードセット（漢ス1の「合」「役」へ修正済み） ======
+  const sets = {
+    "漢ス1":[
+      {front:"たいよう",back:"太陽"},
+      {front:"がっ（そう）",back:"合"},              // 修正
+      {front:"（学校に）かよう",back:"通う"},
+      {front:"（人を）たすける",back:"助ける"},
+      {front:"（どろを）おとす",back:"落とす"},
+      {front:"（出発）しんこう",back:"進行"},
+      {front:"やく（わり）",back:"役"},              // 修正
+      {front:"（試合に）まける",back:"負ける"},
+      {front:"（試合に）かつ",back:"勝つ"},
+      {front:"（畑を）くぎる",back:"区切る"},
+    ],
+    "漢ス2":[
+      {front:"（パンを）うる",back:"売る"},
+      {front:"まいしゅう",back:"毎週"},
+      {front:"けんどう（を走る）",back:"県道"},
+      {front:"しちょうそん",back:"市町村"},
+      {front:"さんちょうめ",back:"三丁目"},
+      {front:"おなじ（船）",back:"同じ"},
+      {front:"やね（がわら）",back:"屋根"},
+      {front:"（全力）とうきゅう",back:"投球"},
+      {front:"（くぎを）うつ",back:"打つ"},
+      {front:"（文の）しゅご",back:"主語"},
+    ],
+    "漢ス3":[
+      {front:"（きつねが）ばける",back:"化ける"},
+      {front:"てつ（の橋）",back:"鉄"},
+      {front:"まんなか",back:"真ん中"},
+      {front:"まるい（輪）",back:"円い"},
+      {front:"（お）きゃく",back:"客"},
+      {front:"服を（きる）",back:"着る"},
+      {front:"（手紙を）おくる",back:"送る"},
+      {front:"にゅういん",back:"入院"},
+      {front:"きらく（な話）",back:"気楽"},
+      {front:"（みかんの）かわ",back:"皮"},
+    ],
+    "漢ス4":[
+      {front:"（自分の）へや",back:"部屋"},
+      {front:"（電話を）うける",back:"受ける"},
+      {front:"（広い）そうげん",back:"草原"},
+      {front:"しょう（ぼう）しゃ",back:"消ぼう車"},
+      {front:"にもつ（を送る）",back:"荷物"},
+      {front:"（本を）はこぶ",back:"運ぶ"},
+      {front:"（のどを）ならす",back:"鳴らす"},
+      {front:"まじめ",back:"真面目"},
+      {front:"ようこう（をあびる）",back:"陽光"},
+      {front:"つうがくろ",back:"通学路"},
+    ],
+    "漢ス5":[
+      {front:"（今と）むかし",back:"昔"},
+      {front:"（青い）ふく",back:"服"},
+      {front:"しゃりょう（を数える）",back:"車両"},
+      {front:"かるい（かばん）",back:"軽い"},
+      {front:"こうじょう（見学）",back:"工場"},
+      {front:"かぐ（を買う）",back:"家具"},
+      {front:"（外の）おんど",back:"温度"},
+      {front:"（校内）びか",back:"美化"},
+      {front:"みじかい（手紙）",back:"短い"},
+      {front:"（本の）せいり",back:"整理"},
+    ],
+    "漢ス6":[
+      {front:"（方角を）さす",back:"指す"},
+      {front:"（家から）ちかい",back:"近い"},
+      {front:"（家から）とおい",back:"遠い"},
+      {front:"（空が）はれる",back:"晴れる"},
+      {front:"（兄と）おとうと",back:"弟"},
+      {front:"しょくぶつ（図かん）",back:"植物"},
+      {front:"（星の）けんきゅう",back:"研究"},
+      {front:"（きれいな）さいく",back:"細工"},
+      {front:"しんかい（の魚）",back:"深海"},
+      {front:"（古い）じだい",back:"時代"},
+    ],
+    "漢ス7":[
+      {front:"じょうば（を楽しむ）",back:"乗馬"},
+      {front:"いんしょくてん",back:"飲食店"},
+      {front:"うんかい（が広がる）",back:"雲海"},
+      {front:"りゅうせい（が見える）",back:"流星"},
+      {front:"もくたん（を運ぶ）",back:"木炭"},
+      {front:"（図を）もちいる",back:"用いる"},
+      {front:"へいわ（な時代）",back:"平和"},
+      {front:"でんち（の交かん）",back:"電池"},
+      {front:"ぎんこう（に行く）",back:"銀行"},
+      {front:"（動物の）はな",back:"鼻"},
+    ],
+    "漢ス8":[
+      {front:"（勉強の）かみさま",back:"神様"},
+      {front:"まつり（に行く）",back:"祭り"},
+      {front:"こまかい（雪）",back:"細かい"},
+      {front:"は（をみがく）",back:"歯"},
+      {front:"（お）いしゃ",back:"医者"},
+      {front:"さかみち（を下る）",back:"坂道"},
+      {front:"くすりばこ",back:"薬箱"},
+      {front:"ゆ（をわかす）",back:"湯"},
+      {front:"たにん（の世話）",back:"他人"},
+      {front:"（人に）たいする",back:"対する"},
+    ],
+    "漢ス9":[
+      {front:"ようふく（を着る）",back:"洋服"},
+      {front:"（広い）みずうみ",back:"湖"},
+      {front:"さけ（をのむ）",back:"酒"},
+      {front:"（水と）あぶら",back:"油"},
+      {front:"（お金を）ひろう",back:"拾う"},
+      {front:"（馬と）ひつじ",back:"羊"},
+      {front:"どうじ（にわらう）",back:"同時"},
+      {front:"（柳本）えき",back:"駅"},
+      {front:"くうこう（につく）",back:"空港"},
+      {front:"せかい（地図）",back:"世界"},
+    ],
+    "漢ス10":[
+      {front:"（名前を）しる",back:"知る"},
+      {front:"にがっき",back:"二学期"},
+      {front:"（算数の）べんきょう",back:"勉強"},
+      {front:"あたらしい（本）",back:"新しい"},
+      {front:"しんきゅう（する）",back:"進級"},
+      {front:"しゅうぎょうしき",back:"終業式"},
+      {front:"せいれつ（する）",back:"整列"},
+      {front:"（国語の）よしゅう",back:"予習"},
+      {front:"（先生に）そうだん",back:"相談"},
+      {front:"はんたい（の意見）",back:"反対"},
+    ],
+  };
+
+  // ====== セット切替UI ======
+  const setNames = Object.keys(sets);
+  const setBar = $('#setBar');
+  let currentSet = setNames[0];
+
+  for(const name of setNames){
+    const b = document.createElement('button');
+    b.className = 'setbtn';
+    b.textContent = name.replace('漢ス','漢ス ');
+    b.dataset.name = name;
+    if(name===currentSet) b.setAttribute('aria-current','true');
+    b.addEventListener('click', ()=>{
+      if(currentSet===name) return;
+      currentSet = name;
+      $$('.setbtn[aria-current="true"]').forEach(x=>x.removeAttribute('aria-current'));
+      b.setAttribute('aria-current','true');
+      $('#currentSetName').textContent = `現在：${name}`;
+      start(true);
+    });
+    setBar.appendChild(b);
+  }
+
+  // ====== タイマー ======
+  let t0=0, elapsed=0, ticker=null, running=false;
+  const fmt = (ms)=>{ const s=Math.floor(ms/1000), m=Math.floor(s/60), ss=s%60, ds=Math.floor((ms%1000)/100); return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}.${ds}`; };
+  function updateTimerUI(){ $('#timer').textContent = fmt(elapsed); $('#timerToggle').textContent = running ? '一時停止' : '再開'; }
+  function startTimer(){ if(running) return; running=true; t0=performance.now()-elapsed; ticker=setInterval(()=>{ elapsed=performance.now()-t0; updateTimerUI(); },100); $('#timerToggle').disabled=false; }
+  function stopTimer(){ if(!running) return; running=false; clearInterval(ticker); ticker=null; updateTimerUI(); }
+  function resetTimer(){ stopTimer(); elapsed=0; updateTimerUI(); }
+
+  // ====== 状態 ======
+  let deck=[], nextDeck=[], idx=-1, flipped=false, started=false;
+  let stats={ok:0, ng:0, seen:0, total:0, round:1};
+  let history=[];
+  let autoMode=false;
+
+  const els = {
+    card: $('#card'), q: $('#question'), a: $('#answer'),
+    ok: $('#okBtn'), ng: $('#ngBtn'), reveal: $('#revealBtn'),
+    redo: $('#redoBtn'), undo: $('#undoBtn'),
+    count: $('#count'), okC: $('#okC'), ngC: $('#ngC'), bar: $('#bar'),
+    manualBtns: $('#manualBtns'), autoRow: $('#autoJudgeRow'),
+    input: $('#answerInput'), judge: $('#judgeBtn')
+  };
+
+  // ====== モード切替 ======
+  $('#autoModeB').addEventListener('change', e=>{
+    autoMode = e.target.checked;
+    if(autoMode){ els.manualBtns.style.display='none'; els.autoRow.style.display='flex'; }
+    else { els.manualBtns.style.display='flex'; els.autoRow.style.display='none'; }
+  });
+
+  // ====== デッキ生成 ======
+  function shuffle(arr){ return arr.sort(()=>Math.random()-0.5); }
+  function buildDeck(){
+    let d = (sets[currentSet]||[]).map(c=>({...c}));
+    if($('#shuffleB').checked) d = shuffle(d);
+    return d;
+  }
+
+  // ====== スタート ======
+  function start(fromSetSwitch=false){
+    deck = buildDeck(); nextDeck=[]; idx=-1; flipped=false; started=true; history=[];
+    stats={ok:0, ng:0, seen:0, total:deck.length, round:1};
+    els.redo.disabled=false; resetTimer(); startTimer();
+    if(!fromSetSwitch) toast(`開始：${currentSet}（${stats.total}枚）`);
+    step();
+  }
+
+  // ====== 1枚進める ======
+  function step(){
+    els.card.classList.remove('ok','ng');
+    els.card.setAttribute('data-flipped','false'); flipped=false; idx++;
+    if(idx >= deck.length){
+      if(nextDeck.length===0){ return showDone(); }
+      deck = $('#shuffleB').checked ? shuffle(nextDeck) : nextDeck.slice();
+      nextDeck=[]; idx=0; stats.round++; toast(`NGのみ再出題（第${stats.round}ラウンド / ${deck.length}枚）`);
+    }
+    const c = deck[idx];
+    els.q.textContent = c.front; els.a.textContent = c.back;
+    if(autoMode){ els.input.value=''; els.judge.disabled=false; els.input.focus({preventScroll:true}); enableAutoDuringQuestion(); }
+    else{ enableManualDuringQuestion(); }
+    updateUI();
+  }
+
+  // ====== 完了 ======
+  function showDone(){
+    els.q.textContent = `すべてOK！（${stats.ok}問 正解）`; els.a.textContent = 'おつかれさま！';
+    disableAll(); els.card.setAttribute('data-flipped','true'); stopTimer();
+    toast(`クリア！ 所要時間: ${$('#timer').textContent}`); updateUI(true);
+  }
+
+  // ====== ボタン状態 ======
+  function enableManualDuringQuestion(){ els.reveal.disabled=false; els.ok.disabled=true; els.ng.disabled=true; els.undo.disabled=history.length===0; $('#timerToggle').disabled=false; }
+  function enableManualAfterReveal(){ els.ok.disabled=false; els.ng.disabled=false; els.undo.disabled=history.length===0; }
+  function enableAutoDuringQuestion(){ els.undo.disabled=history.length===0; $('#timerToggle').disabled=false; }
+  function disableAll(){ els.reveal.disabled=true; els.ok.disabled=true; els.ng.disabled=true; els.undo.disabled=true; els.judge.disabled=true; }
+
+  // ====== 手動操作 ======
+  $('#startBtn').addEventListener('click', ()=> start());
+  $('#revealBtn').addEventListener('click', ()=>{ if(!started||autoMode) return; els.card.setAttribute('data-flipped','true'); flipped=true; enableManualAfterReveal(); });
+  $('#okBtn').addEventListener('click', ()=> decide(true));
+  $('#ngBtn').addEventListener('click', ()=> decide(false));
+  $('#timerToggle').addEventListener('click', ()=>{ running? stopTimer() : startTimer(); });
+
+  function decide(isOk){
+    if(!started) return;
+    const card = deck[idx];
+    history.push({card, isOk});
+    stats.seen++; if(isOk){ stats.ok++; els.card.classList.add('ok'); } else { stats.ng++; nextDeck.push(card); els.card.classList.add('ng'); }
+    updateUI(); setTimeout(()=> step(), 120);
+  }
+
+  $('#undoBtn').addEventListener('click', ()=>{
+    if(history.length===0) return;
+    const last = history.pop(); stats.seen--;
+    if(last.isOk){ stats.ok--; } else { stats.ng--; const i = nextDeck.findIndex(x=>x.front===last.card.front && x.back===last.card.back); if(i>-1) nextDeck.splice(i,1); }
+    idx = Math.max(-1, idx-1); step();
+  });
+
+  $('#redoBtn').addEventListener('click', ()=> start());
+
+  // ====== 採点（厳格：全半角・空白のみ無視） ======
+  function norm(s){ return (s||'').toString().normalize('NFKC').replace(/\s+/g,'').trim(); }
+  function isCorrect(userRaw, ansRaw){
+    const user = norm(userRaw);
+    const ans  = norm(ansRaw);
+    return user && user === ans; // 完全一致のみ
+  }
+
+  // ====== 自動判定 ======
+  function judge(){
+    if(!started || !autoMode) return;
+    const user = els.input.value;
+    const ans  = deck[idx].back;
+    const ok = isCorrect(user, ans);
+    els.card.setAttribute('data-flipped','true'); // 正解面を短時間表示
+    setTimeout(()=> decide(ok), 800);
+  }
+  $('#judgeBtn').addEventListener('click', judge);
+  $('#answerInput').addEventListener('keydown', e=>{ if(e.key==='Enter') judge(); });
+
+  // ====== キーボード（手動モードのみ） ======
+  window.addEventListener('keydown', (e)=>{
+    if(e.target.closest('input,textarea')) return;
+    if(autoMode) return;
+    if(e.code==='Space'){ e.preventDefault(); if(!els.reveal.disabled) $('#revealBtn').click(); return; }
+    if(e.key.toLowerCase()==='o'){ if(!els.ok.disabled) $('#okBtn').click(); }
+    if(e.key.toLowerCase()==='x'){ if(!els.ng.disabled) $('#ngBtn').click(); }
+  });
+
+  // ====== UI更新 ======
+  function updateUI(isDone=false){
+    $('#count').textContent = `${Math.min(stats.seen+1, stats.total)} / ${stats.total}`;
+    $('#okC').textContent = stats.ok; $('#ngC').textContent = stats.ng;
+    const ratio = stats.total ? Math.min(100, Math.round((stats.seen/stats.total)*100)) : 0;
+    $('#bar').style.width = (isDone?100:ratio) + '%';
+  }
+
+  // ====== トースト ======
+  let toastEl;
+  function toast(msg){
+    if(toastEl) toastEl.remove();
+    toastEl = document.createElement('div'); toastEl.textContent = msg;
+    Object.assign(toastEl.style,{ position:'fixed', left:'50%', top:'20px', transform:'translateX(-50%)',
+      background:'#0b1220', border:'1px solid #334155', padding:'10px 14px', borderRadius:'12px', color:'#e5e7eb', boxShadow:'var(--shadow)', zIndex:9999 });
+    document.body.appendChild(toastEl); setTimeout(()=> toastEl && toastEl.remove(), 2200);
+  }
+
+  // 初期表示
+  $('#currentSetName').textContent = `現在：${Object.keys(sets)[0]}`;
+})();
+</script>
+</body>
+</html>
